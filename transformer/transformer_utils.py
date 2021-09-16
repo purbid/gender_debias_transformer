@@ -74,3 +74,16 @@ class Residual(nn.Module):
         # Assume that the "value" tensor is given last, so we can compute the
         # residual.  This matches the signature of 'MultiHeadAttention'.
         return self.norm(tensors[-1] + self.dropout(self.sublayer(*tensors)))
+
+
+
+def pad(list, padding=0, min_len=None):
+    padded = []
+    max_len = max([len(l) for l in list])
+
+    if min_len:
+        max_len = max(min_len, max_len)
+    for l in list:
+        padded.append(l + [padding] * (max_len - len(l)))
+
+    return torch.tensor(padded, dtype=torch.long)

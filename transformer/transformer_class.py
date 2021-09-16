@@ -46,6 +46,7 @@ class TransformerEncoder(nn.Module):
         ])
 
     def forward(self, src: Tensor) -> Tensor:
+        print("inside encoder forward")
         seq_len, dimension = src.size(1), src.size(2)
         src += position_encoding(seq_len, dimension)
         for layer in self.layers:
@@ -142,6 +143,8 @@ class Transformer(nn.Module):
         )
 
     def forward(self, src: Tensor, tgt: Tensor) -> Tensor:
+        print("inside forward")
+        print(self.encoder(src).shape)
         return self.decoder(tgt, self.encoder(src))
 
 
