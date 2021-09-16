@@ -1,0 +1,15 @@
+embedding_size : 512
+num_heads : 8
+num_encoder_layers : 3
+num_decoder_layers : 3
+dropout : 0.10
+max_len : 100
+forward_expansion : 4
+n : 10
+batch_size : 32
+FEATURE_SEP_TRAIN_DATA : "C:\\Users\\User\\PycharmProjects\\gender_transformer\\Data\\unbias_corpus.json"
+num_epochs : 10000
+learning_rate : 3e-4
+SAVE_MODEL_PATH : ""
+DATA_DICT_PATH : "/Users/purbid/PycharmProjects/debias/Debiased-Chat/debias/data/twitter_seq2seq_model.dict"
+GENDER_WORDS_PATH : ""

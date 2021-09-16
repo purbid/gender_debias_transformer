@@ -1,298 +1,262 @@
+import sys
+import json
+import spacy
 import torch
+import math
 import torch.nn as nn
 import torch.optim as optim
-import spacy
-import json
-import sys
 from random import randrange
-from transformer.transformer_utils import pad
+from nltk.corpus import stopwords
+from transformer_utils import pad
+from transformer_class import Transformer
 from torch .utils.tensorboard import SummaryWriter
-from torchtext.data import Field, BucketIterator, TabularDataset
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from disentangle_model.dict_v0 import DictionaryAgent
+stop_words = stopwords.words('english')
 
-################ needed only once #######################
-with open('/Users/purbid/PycharmProjects/debias/Debiased-Chat/debias/data/adv_train_data.json', 'r') as f:
-    train_gender_data_list, train_neutral_data_list = json.load(f)
-total_data=[]
-total_data.extend(train_gender_data_list)
-total_data.extend(train_neutral_data_list)
-
-l=int(len(total_data)*0.7)
-total_train_data=total_data[:l]
-total_val_data=total_data[l:]
-
-print("starting sort")
-##### sort by size, so similar length examples are together #####
-import time
-tt=time.time()
-total_train_data = sorted(total_train_data, key=lambda x: len(x[0]))
-total_val_data = sorted(total_val_data, key=lambda x: len(x[0]))
-
-print(time.time()-tt)
-print("sorted by dialogue length")
-
-
-
-
-
-
-
-# raw_data={'dialogue':[x[0] for x in total_data], "response":[x[1] for x in total_data]}
-# df = pd.DataFrame(raw_data, columns=["dialogue","response"])
-# train, val = train_test_split(df, test_size=0.1)
-# train.to_csv("train_dialogue.csv", index=False)
-# val.to_csv("val_dialogue.csv", index=False)
-################ needed only once #######################
-
-# twitter_text = Field(init_token = "<sos>", eos_token = "<eos>")
-# data_fields = [('dialogue', twitter_text), ('response', twitter_text)]
-# train,val = TabularDataset.splits(path='./', train='train_dialogue.csv', validation='val_dialogue.csv', format='csv', fields=data_fields)
-# print("building_vocab ...")
-# twitter_text.build_vocab(train, max_size=30000, min_freq=2)
-# print("done building vocab ...")
-
-class Transformer(nn.Module):
-    def __init__(
-        self,
-        embedding_size,
-        dict_file,
-        num_heads,
-        num_encoder_layers,
-        num_decoder_layers,
-        forward_expansion,
-        dropout,
-        max_len,
-        device,
-    ):
-
-        super(Transformer, self).__init__()
-        dict_opt = {'dict_file': dict_file}
-        self.dict = DictionaryAgent(dict_opt)
-        self.src_word_embedding = nn.Embedding(len(self.dict), embedding_size)
-        self.src_position_embedding = nn.Embedding(max_len, embedding_size)
-        self.trg_word_embedding = nn.Embedding(len(self.dict), embedding_size)
-        self.trg_position_embedding = nn.Embedding(max_len, embedding_size)
-        self.NULL_IDX = self.dict.tok2ind[self.dict.null_token]
-        self.START_IDX = self.dict.tok2ind[self.dict.start_token]
-        self.END_IDX = self.dict.tok2ind[self.dict.end_token]
-        self.src_pad_idx = self.dict.tok2ind[self.dict.null_token]
-        self.longest_label = 30
-
-        self.device = device
-        self.transformer = nn.Transformer(
-            embedding_size,
-            num_heads,
-            num_encoder_layers,
-            num_decoder_layers,
-            forward_expansion,
-            dropout,
-        )
-        self.fc_out = nn.Linear(embedding_size, len(self.dict))
-        self.dropout = nn.Dropout(dropout)
-
-    def make_src_mask(self, src):
-        src_mask = src.transpose(0, 1) == self.src_pad_idx
-
-        # (N, src_len)
-        return src_mask.to(device)
-
-    def forward(self, src, trg):
-
-        src_seq_length, N = src.shape
-        trg_seq_length, N = trg.shape
-
-        src_positions = (
-            torch.arange(0, src_seq_length)
-                .unsqueeze(1)
-                .expand(src_seq_length, N)
-                .to(device)
-        )
-        trg_positions = (
-            torch.arange(0, trg_seq_length)
-                .unsqueeze(1)
-                .expand(trg_seq_length, N)
-                .to(device)
-        )
-
-        embed_src = self.dropout(
-            (self.src_word_embedding(src) + self.src_position_embedding(src_positions))
-        )
-        embed_trg = self.dropout(
-            (self.trg_word_embedding(trg) + self.trg_position_embedding(trg_positions))
-        )
-
-        src_padding_mask = self.make_src_mask(src)
-        trg_mask = self.transformer.generate_square_subsequent_mask(trg_seq_length).to(
-            self.device
-        )
-
-        out = self.transformer(
-            embed_src,
-            embed_trg,
-            src_key_padding_mask=src_padding_mask,
-            tgt_mask=trg_mask,
-        )
-        out = self.fc_out(out)
-        return out
-
-# We're ready to define everything we need for training our Seq2Seq model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 load_model = True
 save_model = True
-SAVE_MODEL_PATH = ""
-
-# Training hyperparameters
-num_epochs = 10000
-learning_rate = 3e-4
-batch_size = 32
-
-# Model hyperparameters
-
-embedding_size = 512
-num_heads = 8
-num_encoder_layers = 3
-num_decoder_layers = 3
-dropout = 0.10
-max_len = 100
-forward_expansion = 4
-dict_file="/Users/purbid/PycharmProjects/debias/Debiased-Chat/debias/data/twitter_seq2seq_model.dict"
-# src_pad_idx = twitter_text.vocab.stoi["<pad>"]
-
-# Tensorboard to get nice loss plot
-writer = SummaryWriter("runs/loss_plot")
-step = 0
-
-model = Transformer(
-    embedding_size,
-    dict_file,
-    num_heads,
-    num_encoder_layers,
-    num_decoder_layers,
-    forward_expansion,
-    dropout,
-    max_len,
-    device,
-).to(device)
 
 
-n=10
-batch_size = 32
+class Trainer():
 
+    def __init__(self,
+                 learning_rate,
+                 dict_file,
+                 SAVE_MODEL_PATH,
+                 FEATURE_SEP_TRAIN_DATA,
+                 ):
 
-def save_checkpoint(state, filename="my_checkpoint.pth.tar"):
-    print("=> Saving checkpoint")
-    torch.save(state, filename)
-
-
-def load_checkpoint(checkpoint, model, optimizer):
-    print("=> Loading checkpoint")
-    model.load_state_dict(checkpoint["state_dict"] )
-    optimizer.load_state_dict(checkpoint["optimizer"])
-
-
-
-
-
-null_id=model.dict.tok2ind[model.dict.null_token]
-final_train_data=[]
-
-for i in range(len(total_train_data) // (n * batch_size) + 1):
-    nbatch = total_train_data[i * (n * batch_size) : (i+1) * (n * batch_size)]
-    nbatch_list = [([model.dict.tok2ind.get(word, model.dict.tok2ind.get("__unk__")) for word in
-                     [model.dict.start_token, *(ins[0].split()), model.dict.end_token]],
-                    [model.dict.tok2ind.get(word, model.dict.tok2ind.get("__unk__")) for word in
-                     [model.dict.start_token, *(ins[1].split()), model.dict.end_token]]
-                    , ins[2]) for ins in nbatch]
-
-    descend_nbatch_list = sorted(nbatch_list, key=lambda x: len(x[0]), reverse=True)
-    j = 0
-
-    #####descend_nbatch_list is the word to id descending order in terms of num of words
-    #### making mini batches of size 32
-    while len(descend_nbatch_list[j * batch_size : (j+1) * batch_size]) > 0:
-        batch_list = descend_nbatch_list[j * batch_size : (j+1) * batch_size]
-        # text: (batch_size x seq_len)
-        ########## this pads the extra spacew ith zeroes
-
-
-        padded_dialogue = pad([x[0] for x in batch_list], padding=null_id)
-        padded_response = pad([x[1] for x in batch_list], padding=null_id)
-        labels = torch.tensor([x[2] for x in batch_list], dtype=torch.long)
-
-
-        # for i, j in zip(padded_dialogue, padded_response):
-        #     print("dialogue")
-        #     print([model.dict.ind2tok.get(index_to_token) for index_to_token in i.tolist() ])
-        #     print("response")
-        #     print([model.dict.ind2tok.get(index_to_token) for index_to_token in j.tolist() ])
-        final_train_data.append((padded_dialogue, padded_response, labels))
-        j += 1
-
-
-
-
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, factor=0.1, patience=10, verbose=True
-)
-criterion = nn.CrossEntropyLoss(ignore_index=model.src_pad_idx)
-if load_model:
-    load_checkpoint(torch.load(SAVE_MODEL_PATH, map_location=torch.device('cpu')), model, optimizer)
-
-
-
-for epoch in range(num_epochs):
-    print(f"[Epoch {epoch} / {num_epochs}]")
-    if save_model:
-        checkpoint = {
-            "state_dict": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-        }
-        save_checkpoint(checkpoint)
-
-    model.eval()
-    for _ in range(1):
-        random_val_eg=randrange(len(total_val_data))
-        sentence = total_val_data[random_val_eg][0]
-        translated_sentence = translate_sentence(
-            model, "do you think a female president will be good for the country", device, max_length=50
+        self.model = Transformer(dict_file)
+        self.data = FEATURE_SEP_TRAIN_DATA
+        self.save_to = SAVE_MODEL_PATH
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, factor=0.1, patience=10, verbose=True
         )
-        print(f"Response predicted: \n {translated_sentence}")
-        print("response should be(gorund truth): "+str(total_val_data[random_val_eg][1]))
-        print("\n")
-        print("----------------")
-    model.train()
-    losses = []
+        self.criterion = nn.CrossEntropyLoss(ignore_index=self.model.src_pad_idx)
 
-    for batch_idx, batch in enumerate(final_train_data[:5]):
+        self.criterion = nn.CrossEntropyLoss(ignore_index=self.model.src_pad_idx)
+        self.start_id = self.model.dict.tok2ind[self.model.dict.start_token]
+        self.null_id = self.model.dict.tok2ind[self.model.dict.null_token]
 
-        (inp_data, target, gender_label) = batch
-        inp_data = inp_data.permute(1, 0).to(device)
-        target = target.permute(1, 0).to(device)
+        self.eos_id = self.model.dict.tok2ind[self.model.dict.end_token]
+        self.unk_id = self.model.dict.tok2ind[self.model.dict.unk_token]
+        self.vocab_size = len(self.model.dict)
+        self.CrossEntropyLoss = nn.CrossEntropyLoss(reduce=True, reduction='mean')
+        self.padding_weights = torch.ones(self.vocab_size).to(device)
+        self.padding_weights[self.null_id] = 0
+        self.WeightedCrossEntropyLoss = nn.CrossEntropyLoss(weight=self.padding_weights, reduce=True, reduction='mean')
+
+        #############MAKE SURE TO ADD GPU LINE AS WELL.
+        if load_model:
+            self.load_checkpoint(torch.load(SAVE_MODEL_PATH, map_location=torch.device('cpu')), self.model, self.optimizer)
+
+    def save_checkpoint(self, state, filename="my_checkpoint.pth.tar"):
+        print("=> Saving checkpoint")
+        torch.save(state, filename)
+
+    def load_checkpoint(self, checkpoint, optimizer):
+        print("=> Loading checkpoint")
+        self.model.load_state_dict(checkpoint["state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
+
+    def accuracy(self, predictions, truths):
+        print("Here to calculate the accuracy of the predictions")
+
+        # for i,j in zip(predictions, truths):
+        #     print("prediction is: "+str([model.dict.ind2tok.get(index) for index in i.tolist()]))
+        #     print("truth is: "+str([model.dict.ind2tok.get(index) for index in j.tolist()]))
+        #     print("\n")
+        #
+        # exit()
+        ###### only where
+        pads = torch.Tensor.double(truths != 0)
+        corrects = torch.Tensor.double(predictions == truths)
+        valid_corrects = corrects * pads
+
+        return valid_corrects.sum() / pads.sum()
+
+    def eval_loss(self, dists, text, pad_token):
+        print("here to calculate eval loss, different than training loss")
+
+        loss = 0
+        num_tokens = 0
+
+        for dist, y in zip(dists, text):
+            y_len = sum([1 if y_i != pad_token else 0 for y_i in y])
+            for i in range(y_len):
+                loss -= torch.log(dist[i][y[i]])
+                num_tokens += 1
+
+        return loss, num_tokens
+
+    def prepare_training_datasets(self, batch_size, n=10):
+        with open(self.data, 'r') as f:
+            data_list = json.load(f)
+            train_data_list = data_list[:-4500]
+            valid_data_list = data_list[-4500:]
+        train_data = []
+        ######range(5000//321):
+        ###first batch is 0:320
+        for i in range(len(train_data_list) // (n * batch_size) + 1):
+            nbatch = train_data_list[i * (n * batch_size): (i + 1) * (n * batch_size)]
+            nbatch_list = [([self.model.dict.tok2ind.get(word, self.unk_id) for word in
+                             [self.model.dict.start_token, *(ins[0].split()), self.model.dict.end_token]],
+                            ins[1]) for ins in nbatch]
+            descend_nbatch_list = sorted(nbatch_list, key=lambda x: len(x[0]), reverse=True)
+            j = 0
+
+            #####descend_nbatch_list is the wordtoid descending order in terms of num of words
+            #### making mini batches of size 32
+            while len(descend_nbatch_list[j * batch_size: (j + 1) * batch_size]) > 0:
+                batch_list = descend_nbatch_list[j * batch_size: (j + 1) * batch_size]
+                # text: (batch_size x seq_len)
+                ########## this pads the extra spacew ith zeroes
+
+                text = pad([x[0] for x in batch_list], padding=self.null_id)
+                labels = torch.tensor([x[1] for x in batch_list], dtype=torch.long)
+
+                train_data.append((text, labels))
+                j += 1
+
+        """
+        example of train data tensor([   8,  175,  111,   11,  236,   18,  626,   22, 2000,    3,    9,   31,
+                  28, 3094,   82, 5763,  115,   17, 1263,    4]) tensor(0)
+        """
+
+        valid_data = []
+        for i in range(len(valid_data_list) // (n * batch_size) + 1):
+            nbatch = valid_data_list[i * (n * batch_size): (i + 1) * (n * batch_size)]
+
+            nbatch_list = [([self.model.dict.tok2ind.get(word, self.unk_id) for word in
+                             [self.model.dict.start_token, *(ins[0].split()), self.model.dict.end_token]],
+                            ins[1]) for ins in nbatch]
+            descend_nbatch_list = sorted(nbatch_list, key=lambda x: len(x[0]), reverse=True)
+
+            j = 0
+            while len(descend_nbatch_list[j * batch_size: (j + 1) * batch_size]) > 0:
+                batch_list = descend_nbatch_list[j * batch_size: (j + 1) * batch_size]
+
+                # text: (batch_size x seq_len)
+                text = pad([x[0] for x in batch_list], padding=self.null_id)
+
+                labels = torch.tensor([x[1] for x in batch_list], dtype=torch.long)
+
+                valid_data.append((text, labels))
+                j += 1
+
+        return train_data, valid_data
 
 
-        output = model(inp_data, target[:-1, :])
-        output = output.reshape(-1, output.shape[2])
-        target = target[1:].reshape(-1)
-        optimizer.zero_grad()
 
-        loss = criterion(output, target)
-        losses.append(loss.item())
+    def train(self, n_epoch):
 
-        loss.backward()
+        step = 0
+        losses = []
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1)
+        self.train_data, self.valid_data = self.prepare_training_datasets(self.model, 32)
 
-        optimizer.step()
-        print("loss is "+str(loss.item()))
-        writer.add_scalar("Training loss", loss, global_step=step)
-        step += 1
+        for epoch in range(n_epoch):
+            for i_batch, batch in enumerate(self.train_data):
+                # text: (batch_size x seq_len)
+                # labels: (batch_size)
 
-    mean_loss = sum(losses) / len(losses)
-    scheduler.step(mean_loss)
+                text, target = batch
+
+                text = text.to(device)
+                target = target.to(device)
+
+                self.model.train()
+                output = self.model(text, target[:-1, :])
+                output = output.reshape(-1, output.shape[2])
+                target = target[1:].reshape(-1)
+                self.optimizer.zero_grad()
+                reconstruction_loss = self.WeightedCrossEntropyLoss(output, target)
+                losses.append(reconstruction_loss.item())
+                reconstruction_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1)
+                self.optimizer.step()
+
+
+                if torch.isnan(loss):
+                    print("loss NAN.")
+                    print(reconstruction_loss)
+                    continue
 
 
 
+
+                text = text.permute(1, 0)
+                text = text[1:]
+                re_acc = self.accuracy(preds[1:], text)
+
+
+                if i_batch % 100 == 0:
+                    print(
+                        "train autoencoder epoch: {}  batch: {} / {}  batch_size: {}  loss: {:.6f}  re_acc: {:.4f} ".format(
+                            epoch, i_batch, len(self.train_data), len(text), reconstruction_loss.item(), re_acc))
+                if i_batch % 1000 == 0:
+                    print("-----------------------------Validation-----------------------------")
+                    self.model.eval()
+                    total_loss = 0
+                    total_num_tokens = 0
+
+                    #
+                    r = 0
+
+                    for i_batch, batch in enumerate(self.valid_data):
+                        # text: (batch_size x seq_len)
+                        # labels: (batch_size)
+                        val_text, val_labels = batch
+                        val_text = val_text.to(device)
+                        val_labels = val_labels.to(device)
+
+                        # preds: (batch_size x seq_len)
+                        # scores: (batch_size x seq_len x vocab_size)
+
+                        val_text = val_text.permute(1, 0)
+                        target = val_text.detach().clone().to(device)
+                        output = self.model(val_text,target, val=True)
+
+
+                        loss, num_tokens = self.eval_loss(output[1:], target[1:], pad_token=self.null_id)
+                        total_loss += loss.item()
+                        total_num_tokens += num_tokens
+
+                        re_acc = self.accuracy(preds[1:], val_text[1:])
+
+                    if i_batch == r:
+                        val_text = val_text.permute(1, 0)
+                        preds = preds.permute(1, 0)
+                        for truth, pred in zip(val_text, preds):
+                            truth_null_id_list = [i for i in range(len(truth)) if truth[i] == self.null_id]
+                            pred_eos_id_list = [i for i in range(len(pred)) if pred[i] == self.eos_id]
+
+                            truth_null_id = len(truth) if len(truth_null_id_list) == 0 else truth_null_id_list[0]
+                            # print([model.dict.ind2tok.get(x) for x in truth.tolist()])
+                            # print([model.dict.ind2tok.get(x) for x in pred.tolist()])
+
+                            pred_eos_id = len(pred) if len(pred_eos_id_list) == 0 else pred_eos_id_list[0]
+                            print('truth: {}'.format(
+                                ' '.join([self.model.dict.ind2tok.get(idx, '__unk__') for idx in
+                                          truth[1:truth_null_id].tolist()])))
+                            print('pred: {}'.format(
+                                ' '.join([self.model.dict.ind2tok.get(idx, '__unk__') for idx in
+                                          pred[1:pred_eos_id].tolist()])))
+                            print('------------------------------------------------------------')
+                ave_loss = total_loss / total_num_tokens
+                ppl = math.exp(ave_loss)
+
+                torch.save(self.model.state_dict(),self.save_to)
+                print("Model saved to save_model/disen_model.pt")
+                print("Model performance: ppl_{:.4f} ".format(ppl))
+
+#
+# src = torch.rand(64, 16, 512)
+# tgt = torch.rand(64, 16, 512)
+# model = Transformer()
+# out = model(src, tgt)
+
+
+if __name__ == "__main__":
+    print("yes")

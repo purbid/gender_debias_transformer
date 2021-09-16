@@ -2,7 +2,7 @@ from torch import nn
 from torch import Tensor
 import torch
 from transformer.transformer_utils import Residual, MultiHeadAttention, feed_forward, position_encoding
-
+from dict_v0 import DictionaryAgent
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(
@@ -118,6 +118,7 @@ class TransformerDecoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
+        dict_file,
         num_encoder_layers: int = 6,
         num_decoder_layers: int = 6,
         dim_model: int = 512,
@@ -126,6 +127,8 @@ class Transformer(nn.Module):
         dropout: float = 0.1,
         activation: nn.Module = nn.ReLU(),
     ):
+
+
         super().__init__()
         self.encoder = TransformerEncoder(
             num_layers=num_encoder_layers,
@@ -142,14 +145,18 @@ class Transformer(nn.Module):
             dropout=dropout,
         )
 
+        dict_opt = {'dict_file': dict_file}
+        self.dict = DictionaryAgent(dict_opt)
+        self.vocab_size = len(self.dict)
+
     def forward(self, src: Tensor, tgt: Tensor) -> Tensor:
         print("inside forward")
         print(self.encoder(src).shape)
         return self.decoder(tgt, self.encoder(src))
 
 
-
-src = torch.rand(64, 16, 512)
-tgt = torch.rand(64, 16, 512)
-out = Transformer()(src, tgt)
-print(out.shape)
+#
+# src = torch.rand(64, 16, 512)
+# tgt = torch.rand(64, 16, 512)
+# out = Transformer()(src, tgt)
+# print(out.shape)
