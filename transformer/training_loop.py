@@ -3,6 +3,7 @@ import json
 import spacy
 import torch
 import math
+import yaml
 import torch.nn as nn
 import torch.optim as optim
 from random import randrange
@@ -10,10 +11,11 @@ from nltk.corpus import stopwords
 from transformer_utils import pad
 from transformer_class import Transformer
 from torch .utils.tensorboard import SummaryWriter
+
 stop_words = stopwords.words('english')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-load_model = True
+load_model = False
 save_model = True
 
 
@@ -21,21 +23,19 @@ class Trainer():
 
     def __init__(self,
                  learning_rate,
-                 dict_file,
+                 DATA_DICT_PATH,
                  SAVE_MODEL_PATH,
                  FEATURE_SEP_TRAIN_DATA,
                  ):
 
-        self.model = Transformer(dict_file)
+        self.model = Transformer(DATA_DICT_PATH)
         self.data = FEATURE_SEP_TRAIN_DATA
         self.save_to = SAVE_MODEL_PATH
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, factor=0.1, patience=10, verbose=True
         )
-        self.criterion = nn.CrossEntropyLoss(ignore_index=self.model.src_pad_idx)
 
-        self.criterion = nn.CrossEntropyLoss(ignore_index=self.model.src_pad_idx)
         self.start_id = self.model.dict.tok2ind[self.model.dict.start_token]
         self.null_id = self.model.dict.tok2ind[self.model.dict.null_token]
 
@@ -154,8 +154,8 @@ class Trainer():
         step = 0
         losses = []
 
-        self.train_data, self.valid_data = self.prepare_training_datasets(self.model, 32)
-
+        self.train_data, self.valid_data = self.prepare_training_datasets(n_epoch)
+        best_accuracy = 0
         for epoch in range(n_epoch):
             for i_batch, batch in enumerate(self.train_data):
                 # text: (batch_size x seq_len)
@@ -163,15 +163,18 @@ class Trainer():
 
                 text, target = batch
 
+
                 text = text.to(device)
                 target = target.to(device)
 
                 self.model.train()
-                output = self.model(text, target[:-1, :])
+                print("input shape for model "+str(text.shape))
+
+                output = self.model(text, text)
                 output = output.reshape(-1, output.shape[2])
                 target = target[1:].reshape(-1)
                 self.optimizer.zero_grad()
-                reconstruction_loss = self.WeightedCrossEntropyLoss(output, target)
+                reconstruction_loss = self.WeightedCrossEntropyLoss(output, text)
                 losses.append(reconstruction_loss.item())
                 reconstruction_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1)
@@ -247,8 +250,10 @@ class Trainer():
                 ave_loss = total_loss / total_num_tokens
                 ppl = math.exp(ave_loss)
 
-                torch.save(self.model.state_dict(),self.save_to)
-                print("Model saved to save_model/disen_model.pt")
+                if re_acc > best_accuracy:
+                    torch.save(self.model.state_dict(),self.save_to+ "\\dissen_model"+epoch+"_"+i_batch+".pt")
+                    print("Model saved to save_model/disen_model.pt")
+
                 print("Model performance: ppl_{:.4f} ".format(ppl))
 
 #
@@ -256,7 +261,15 @@ class Trainer():
 # tgt = torch.rand(64, 16, 512)
 # model = Transformer()
 # out = model(src, tgt)
-
+#  DATA_DICT_PATH,
+#                  SAVE_MODEL_PATH,
+#                  FEATURE_SEP_TRAIN_DATA,
+#                  ):
 
 if __name__ == "__main__":
-    print("yes")
+    with open("feature_separation_config.yaml", "r") as ymlfile:
+        cfg = yaml.load(ymlfile)
+
+    t = Trainer(cfg['learning_rate'], cfg['DATA_DICT_PATH'], cfg['SAVE_MODEL_PATH'], cfg['FEATURE_SEP_TRAIN_DATA'])
+    t.train(32)
+

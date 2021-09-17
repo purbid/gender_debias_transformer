@@ -9,7 +9,7 @@ n : 10
 batch_size : 32
 FEATURE_SEP_TRAIN_DATA : "C:\\Users\\User\\PycharmProjects\\gender_transformer\\Data\\unbias_corpus.json"
 num_epochs : 10000
-learning_rate : 3e-4
-SAVE_MODEL_PATH : ""
-DATA_DICT_PATH : "/Users/purbid/PycharmProjects/debias/Debiased-Chat/debias/data/twitter_seq2seq_model.dict"
+learning_rate : 0.001
+SAVE_MODEL_PATH : "C:\\Users\\User\\PycharmProjects\\gender_transformer\\transformer\\saved_models"
+DATA_DICT_PATH : "C:\\Users\\User\\PycharmProjects\\gender_transformer\\Data\\twitter_seq2seq_model.dict"
 GENDER_WORDS_PATH : ""

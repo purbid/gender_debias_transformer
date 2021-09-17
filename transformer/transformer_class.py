@@ -33,6 +33,8 @@ class TransformerEncoderLayer(nn.Module):
 class TransformerEncoder(nn.Module):
     def __init__(
         self,
+        vocab_size: int = 30000,
+        embedding_size : int =512,
         num_layers: int = 6,
         dim_model: int = 512,
         num_heads: int = 8,
@@ -40,13 +42,15 @@ class TransformerEncoder(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
+        self.word_embedding = nn.Embedding(vocab_size, embedding_size)
         self.layers = nn.ModuleList([
             TransformerEncoderLayer(dim_model, num_heads, dim_feedforward, dropout)
             for _ in range(num_layers)
         ])
 
     def forward(self, src: Tensor) -> Tensor:
-        print("inside encoder forward")
+
+        src = self.word_embedding(src)
         seq_len, dimension = src.size(1), src.size(2)
         src += position_encoding(seq_len, dimension)
         for layer in self.layers:
@@ -91,6 +95,8 @@ class TransformerDecoderLayer(nn.Module):
 class TransformerDecoder(nn.Module):
     def __init__(
         self,
+        vocab_size: int = 30000,
+        embedding_size: int = 512,
         num_layers: int = 6,
         dim_model: int = 512,
         num_heads: int = 8,
@@ -98,6 +104,7 @@ class TransformerDecoder(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
+        self.word_embedding = nn.Embedding(vocab_size, embedding_size)
         self.layers = nn.ModuleList([
             TransformerDecoderLayer(dim_model, num_heads, dim_feedforward, dropout)
             for _ in range(num_layers)
@@ -105,15 +112,13 @@ class TransformerDecoder(nn.Module):
         self.linear = nn.Linear(dim_model, dim_model)
 
     def forward(self, tgt: Tensor, memory: Tensor) -> Tensor:
+        tgt = self.word_embedding(tgt)
         seq_len, dimension = tgt.size(1), tgt.size(2)
         tgt += position_encoding(seq_len, dimension)
         for layer in self.layers:
             tgt = layer(tgt, memory)
 
         return torch.softmax(self.linear(tgt), dim=-1)
-
-
-
 
 class Transformer(nn.Module):
     def __init__(
@@ -127,10 +132,24 @@ class Transformer(nn.Module):
         dropout: float = 0.1,
         activation: nn.Module = nn.ReLU(),
     ):
+        # src_vocab_size,
+        # embed_size,
+        # forward_expansion,
+        # dropout,
+        # max_length,
+
 
 
         super().__init__()
+
+        dict_opt = {'dict_file': dict_file}
+        self.dict = DictionaryAgent(dict_opt)
+        self.vocab_size = len(self.dict)
+        self.embed_size = 512
+
         self.encoder = TransformerEncoder(
+            self.vocab_size,
+            self.embed_size,
             num_layers=num_encoder_layers,
             dim_model=dim_model,
             num_heads=num_heads,
@@ -145,9 +164,7 @@ class Transformer(nn.Module):
             dropout=dropout,
         )
 
-        dict_opt = {'dict_file': dict_file}
-        self.dict = DictionaryAgent(dict_opt)
-        self.vocab_size = len(self.dict)
+
 
     def forward(self, src: Tensor, tgt: Tensor) -> Tensor:
         print("inside forward")
