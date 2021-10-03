@@ -8,7 +8,7 @@ class TransformerEncoderLayer(nn.Module):
     def __init__(
         self,
         dim_model: int = 512,
-        num_heads: int = 6,
+        num_heads: int = 8,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
     ):
@@ -64,7 +64,7 @@ class TransformerDecoderLayer(nn.Module):
     def __init__(
         self,
         dim_model: int = 512,
-        num_heads: int = 6,
+        num_heads: int = 8,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
     ):
@@ -87,8 +87,13 @@ class TransformerDecoderLayer(nn.Module):
         )
 
     def forward(self, tgt: Tensor, memory: Tensor) -> Tensor:
+        print("tgt decoder layer tgt is :"+str(tgt.shape))
+        print("memory shape is :"+str(memory.shape))
+        print("decoder attention 1 starting: ")
         tgt = self.attention_1(tgt, tgt, tgt)
-        tgt = self.attention_2(memory, memory, tgt)
+        print("finished attention 1, tgt now is : "+str(tgt.shape))
+        tgt = self.attention_2(tgt, memory, memory)
+        print("finished attention 2, tgt now is : " + str(tgt.shape))
         return self.feed_forward(tgt)
 
 
@@ -115,6 +120,7 @@ class TransformerDecoder(nn.Module):
         tgt = self.word_embedding(tgt)
         seq_len, dimension = tgt.size(1), tgt.size(2)
         tgt += position_encoding(seq_len, dimension)
+        print("tgt dim is : "+str(tgt.shape))
         for layer in self.layers:
             tgt = layer(tgt, memory)
 
@@ -169,6 +175,7 @@ class Transformer(nn.Module):
     def forward(self, src: Tensor, tgt: Tensor) -> Tensor:
         print("inside forward")
         print(self.encoder(src).shape)
+        print("decoder input is tgt tensor: "+str(tgt.shape))
         return self.decoder(tgt, self.encoder(src))
 
 
