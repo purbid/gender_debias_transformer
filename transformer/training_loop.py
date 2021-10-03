@@ -169,16 +169,28 @@ class Trainer():
 
                 self.model.train()
                 print("input shape for model "+str(text.shape))
+                tgt_input = text[:, :-1]
+                output = self.model(text, tgt_input)
+                print("output shape is ")
+                print(output.shape)
+                # tgt_out = tgt[1:, :]
+                # loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_out.reshape(-1))
 
-                output = self.model(text, text)
+
                 output = output.reshape(-1, output.shape[2])
                 target = target[1:].reshape(-1)
                 self.optimizer.zero_grad()
-                reconstruction_loss = self.WeightedCrossEntropyLoss(output, text)
+                print(output.shape, target.shape)
+
+                reconstruction_loss = self.WeightedCrossEntropyLoss(output, target)
+                print(reconstruction_loss)
+                exit()
                 losses.append(reconstruction_loss.item())
                 reconstruction_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1)
                 self.optimizer.step()
+
+
 
 
                 if torch.isnan(loss):

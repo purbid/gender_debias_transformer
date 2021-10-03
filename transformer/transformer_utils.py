@@ -6,14 +6,18 @@ import torch.nn.functional as f
 
 def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor) -> Tensor:
     ##### transpose the key matrix and multiply by query
+    print("query dim is : "+str(query.shape))
+    print("key shape is : "+str(key.shape))
+    print("value shape is :"+str(value.shape))
 
-    temp = query.bmm(key.transpose(1, 2))
-
+    temp = torch.bmm(query, key.transpose(1, 2))
     ### square root of num dim, this divides the temp
     scale = query.size(-1) ** 0.5
     softmax = f.softmax(temp / scale, dim=-1)
-
-    return softmax.bmm(value)
+    print("softmax dim is: "+str(softmax.shape))
+    print("value dim is: "+str(value.shape))
+    res  = torch.bmm(softmax, value)
+    return res
 
 
 def position_encoding(
@@ -34,6 +38,9 @@ class AttentionHead(nn.Module):
         self.value = nn.Linear(dim_in, dim_v)
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        # print("query is : "+str(query.shape))
+        # print("key is : " + str(key.shape))
+        # print("value is : " + str(value.shape))
         return scaled_dot_product_attention(self.query(query), self.key(key), self.value(value))
 
 
@@ -46,13 +53,17 @@ class MultiHeadAttention(nn.Module):
             [AttentionHead(dim_in, dim_k, dim_v) for _ in range(num_heads)]
         )
 
-        #### this linear layer takes in the input from multi headed slef attention
+        #### this linear layer takes in the input from multi headed self attention
         self.linear = nn.Linear(num_heads * dim_v, dim_in)
 
     def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
-        return self.linear(
+
+        full_attention = self.linear(
             torch.cat([h(query, key, value) for h in self.heads], dim=-1)
         )
+        print(full_attention.shape)
+        print("above is the full_Attention shape")
+        return full_attention
 
 
 def feed_forward(dim_input: int = 512, dim_feedforward: int = 2048) -> nn.Module:
@@ -73,7 +84,10 @@ class Residual(nn.Module):
     def forward(self, *tensors: Tensor) -> Tensor:
         # Assume that the "value" tensor is given last, so we can compute the
         # residual.  This matches the signature of 'MultiHeadAttention'.
-        return self.norm(tensors[-1] + self.dropout(self.sublayer(*tensors)))
+        print("***************************")
+        print(str(self.sublayer(*tensors).shape)+" this is inside the residual layer "+str(tensors[-1].shape))
+        print("***************************")
+        return self.norm(tensors[0] + self.dropout(self.sublayer(*tensors)))
 
 
 
